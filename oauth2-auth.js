@@ -4,6 +4,82 @@ module.exports = function (RED) {
   const crypto = require("crypto");
   const request = require('request');
 
+  // Some token endpoints sit behind a WAF (e.g. Cloudflare) that answers requests
+  // without a User-Agent with an HTML error page instead of the token response.
+  const USER_AGENT = "node-red-oauth2-auth/" + require("./package.json").version;
+  const TOKEN_REQUEST_HEADERS = { "User-Agent": USER_AGENT };
+
+  const MAX_BODY_SNIPPET_LENGTH = 200;
+
+  // Short, single line description of a response body for error messages.
+  function describeResponseBody(data) {
+    if (data === undefined || data === null || data === "") {
+      return "<empty body>";
+    }
+
+    var text;
+
+    try {
+      text = typeof data === "string" ? data : JSON.stringify(data);
+    } catch (e) {
+      text = String(data);
+    }
+
+    text = text.replace(/\s+/g, " ").trim();
+
+    if (text.length > MAX_BODY_SNIPPET_LENGTH) {
+      text = text.substring(0, MAX_BODY_SNIPPET_LENGTH) + "...";
+    }
+
+    return text;
+  }
+
+  // The "error"/"error_description" pair of an OAuth2 error response (RFC 6749).
+  function describeOAuthError(data) {
+    if (!data || typeof data !== "object" || !data.error) {
+      return null;
+    }
+
+    return data.error_description ? data.error + " (" + data.error_description + ")" : String(data.error);
+  }
+
+  // Returns a description of what is wrong with a token endpoint response,
+  // or null if the response carries a usable access token.
+  function getTokenResponseError(result, data) {
+    const status_code = result && result.statusCode;
+
+    if (typeof status_code === "number" && (status_code < 200 || status_code > 299)) {
+      return "Token endpoint returned HTTP " + status_code + ": " + (describeOAuthError(data) || describeResponseBody(data));
+    }
+
+    if (!data || typeof data !== "object") {
+      return "Unexpected response from token endpoint (HTTP " + status_code + "): " + describeResponseBody(data);
+    }
+
+    const oauth_error = describeOAuthError(data);
+
+    if (oauth_error) {
+      return oauth_error;
+    }
+
+    if (typeof data.access_token !== "string" || data.access_token.length === 0) {
+      return "Token endpoint response contains no access_token (HTTP " + status_code + ").";
+    }
+
+    return null;
+  }
+
+  // Expiry as absolute time in seconds, or null if the response does not tell us.
+  function getExpireTime(data, now) {
+    const expires_in = Number(data.expires_in);
+
+    if (!Number.isFinite(expires_in) || expires_in <= 0) {
+      return null;
+    }
+
+    return { expires_in: expires_in, expire_time: now + expires_in };
+  }
+
   function OAuth2AuthConfig(config) {
     RED.nodes.createNode(this, config);
   }
@@ -82,13 +158,14 @@ module.exports = function (RED) {
 
     // Access token is expiured - Perform refresh
     request.post({
-      url: node.credentials.access_token_url,
+      url: creds.access_token_url,
       json: true,
+      headers: TOKEN_REQUEST_HEADERS,
       form: {
         grant_type: 'refresh_token',
-        client_id: node.credentials.client_id,
-        client_secret: node.credentials.client_secret,
-        refresh_token: node.credentials.refresh_token
+        client_id: creds.client_id,
+        client_secret: creds.client_secret,
+        refresh_token: creds.refresh_token
       }
     }, 
     function (err, result, data) {
@@ -97,18 +174,24 @@ module.exports = function (RED) {
         return callback(err);
       }
 
-      if (!data || data.error) {
-        const err = data && data.error ? data.error : "Invalid response from token server";
-        node.error(RED._("oauth2auth.error.something_broke", { error: err }));
-        return callback(err);
+      // Only a 2xx response carrying an access token is a successful refresh.
+      // Anything else (e.g. an HTML error page from a WAF) must not overwrite
+      // the stored credentials.
+      const response_error = getTokenResponseError(result, data);
+
+      if (response_error) {
+        node.error(RED._("oauth2auth.error.refresh_access_token", { error: response_error }));
+        return callback(response_error);
       }
+
+      const expiry = getExpireTime(data, now);
 
       const newCredentials = {
         ...creds,
         access_token:  data.access_token,
         refresh_token: data.refresh_token || creds.refresh_token,
-        expires_in:    data.expires_in,
-        expire_time:   now + data.expires_in,
+        expires_in:    expiry ? expiry.expires_in : undefined,
+        expire_time:   expiry ? expiry.expire_time : undefined,
         auth_time:     now
       };
 
@@ -181,6 +264,7 @@ module.exports = function (RED) {
     request.post({
       url: credentials.access_token_url,
       json: true,
+      headers: TOKEN_REQUEST_HEADERS,
       form: {
         grant_type: 'authorization_code',
         code: auth_code,
@@ -194,14 +278,22 @@ module.exports = function (RED) {
           return res.send(RED._("oauth2auth.error.get_access_token", { error: err }));
         }
 
-        if (data.error) {
-          return res.send(RED._("oauth2auth.error.something_broke", { error: data.error }));
+        // Only a 2xx response carrying an access token counts as a successful
+        // code exchange. Everything else is reported instead of being stored as
+        // an "authorized" node without any token.
+        const response_error = getTokenResponseError(result, data);
+
+        if (response_error) {
+          return res.send(RED._("oauth2auth.error.something_broke", { error: response_error }));
         }
+
+        const now = Math.floor(Date.now() / 1000);
+        const expiry = getExpireTime(data, now);
 
         credentials.access_token = data.access_token;
         credentials.refresh_token = data.refresh_token;
-        credentials.expires_in = data.expires_in;
-        credentials.expire_time = data.expires_in + (new Date().getTime() / 1000);
+        credentials.expires_in = expiry ? expiry.expires_in : undefined;
+        credentials.expire_time = expiry ? expiry.expire_time : undefined;
         credentials.auth_time = Date.now();
 
         delete credentials.csrf_token;

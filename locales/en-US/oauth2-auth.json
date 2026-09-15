@@ -26,6 +26,7 @@
       "save_node_credentials_failed": "Cannot save node credentials: __error__",
       "csrf_token_mismatch": "CSRF token mismatch, possible cross-site request forgery attempt.",
       "get_access_token": "Error getting access token: __error__",
+      "refresh_access_token": "Error refreshing access token: __error__",
       "no_access_token": "No access token available.",
       "something_broke": "Something went wrong in the authorization process. Please try again. __error__"
     },
