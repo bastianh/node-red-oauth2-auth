@@ -1,9 +1,11 @@
 {
-  "name": "@ralfuhlig/node-red-oauth2-auth",
+  "name": "@bastianh/node-red-oauth2-auth-fork",
   "version": "0.4.1",
-  "description": "node-red-oauth2-auth - OAuth2 client for getting oauth2 credentials by the authorization flow to use in other nodes. Credentials are automatically refreshed on expiration.",
+  "description": "Fork of @ralfuhlig/node-red-oauth2-auth - OAuth2 client for getting oauth2 credentials by the authorization flow to use in other nodes. Credentials are automatically refreshed on expiration.",
   "author": "Ralf Uhlig <ralf@uhlig-online.de>",
-  "contributors": [],
+  "contributors": [
+    "bastianh <dafire@gmail.com>"
+  ],
   "license": "Apache-2.0",
   "keywords": [
     "node-red",
@@ -27,10 +29,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/RalfUhlig/node-red-contrib-oauth2-auth.git"
+    "url": "git+https://github.com/bastianh/node-red-oauth2-auth.git"
   },
   "bugs": {
-    "url": "https://github.com/RalfUhlig/node-red-contrib-oauth2-auth/issues"
+    "url": "https://github.com/bastianh/node-red-oauth2-auth/issues"
   },
-  "homepage": "https://github.com/RalfUhlig/node-red-contrib-oauth2-auth#readme"
+  "homepage": "https://github.com/bastianh/node-red-oauth2-auth#readme"
 }

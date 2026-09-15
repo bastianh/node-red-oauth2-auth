@@ -9,6 +9,8 @@
       authentication_url: { value: "", required: true },
       redirect_url: { value: "" },
       access_token_url: { value: "", required: true },
+      body_format: { value: "form" },
+      extra_headers: { value: "" },
     },
     label: function () { return this.client_name; },
 
@@ -76,6 +78,27 @@
     </label>
     <input type="text" id="node-config-input-access_token_url" data-i18n="[placeholder]oauth2auth.label.access_token_url">
   </div>
+
+  <div class="form-row">
+    <label for="node-config-input-body_format">
+      <i class="fa fa-wrench fa-fw"></i>
+      <span data-i18n="oauth2auth.label.body_format"></span>
+    </label>
+    <select id="node-config-input-body_format">
+      <option value="form" data-i18n="oauth2auth.label.opt_body_form"></option>
+      <option value="json" data-i18n="oauth2auth.label.opt_body_json"></option>
+    </select>
+  </div>
+
+  <div class="form-row">
+    <label for="node-config-input-extra_headers" style="vertical-align: top;">
+      <i class="fa fa-list fa-fw"></i>
+      <span data-i18n="oauth2auth.label.extra_headers"></span>
+    </label>
+    <textarea id="node-config-input-extra_headers" rows="4" style="width: 70%;" placeholder="X-Api-Key: ..."></textarea>
+  </div>
+
+  <div class="form-tips" data-i18n="[html]oauth2auth.message.extra_headers_tip"></div>
 </script>
 
 <script type="text/html" data-help-name="oauth2-auth-config">
@@ -146,6 +169,8 @@
         var authentication_url = client_config ? client_config.authentication_url : "";
         var redirect_url = client_config ? client_config.redirect_url : "";
         var access_token_url = client_config ? client_config.access_token_url : "";
+        var body_format = client_config && client_config.body_format ? client_config.body_format : "form";
+        var extra_headers = client_config && client_config.extra_headers ? client_config.extra_headers : "";
         var scope = $("#node-input-scope").val();
         var force_login = $("#node-input-force_login").is(':checked');
 
@@ -156,6 +181,8 @@
             + "&authentication_url=" + encodeURIComponent(authentication_url)
             + "&redirect_url=" + encodeURIComponent(redirect_url)
             + "&access_token_url=" + encodeURIComponent(access_token_url)
+            + "&body_format=" + encodeURIComponent(body_format)
+            + (extra_headers.length !== 0 ? "&extra_headers=" + encodeURIComponent(extra_headers) : "")
             + "&force_login=" + force_login
             + (scope.length !== 0 ? "&scope=" + encodeURIComponent(scope) : "")
           $(this).attr("href", url);

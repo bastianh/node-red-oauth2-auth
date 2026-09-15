@@ -14,6 +14,10 @@
       "authentication_url": "Authentication Url",
       "redirect_url": "Redirect Url",
       "access_token_url": "Access Token Url",
+      "body_format": "Body Format",
+      "opt_body_form": "Form encoded (application/x-www-form-urlencoded)",
+      "opt_body_json": "JSON (application/json)",
+      "extra_headers": "Extra Headers",
       "authorize": "Authorize",
       "authorized": "Authorized",
       "name": "Name"
@@ -28,7 +32,8 @@
       "get_access_token": "Error getting access token: __error__",
       "refresh_access_token": "Error refreshing access token: __error__",
       "no_access_token": "No access token available.",
-      "something_broke": "Something went wrong in the authorization process. Please try again. __error__"
+      "something_broke": "Something went wrong in the authorization process. Please try again. __error__",
+      "invalid_extra_headers": "Invalid extra headers in the client config: __error__"
     },
     "status": {
       "refreshing": "Refreshing",
@@ -37,7 +42,8 @@
     "message": {
       "authorisation_successful": "<html><head></head><body>Authorisation successful - you can close this window and return to Node-RED</body></html>",
       "help_text": "<p>OAuth2 client for getting oauth2 credentials by the authorization flow to use in other nodes. Credentials are automatically refreshed on expiration.</p>",
-      "config_help_text": "<p>Configuration for oauth2 client.</p>"
+      "config_help_text": "<p>Configuration for oauth2 client.</p>",
+      "extra_headers_tip": "Extra headers are sent with the token requests, one <b>Name: Value</b> per line. Use them for APIs that require an extra header, e.g. an API key. <code>Content-Type</code> is set from the body format above and must not be listed here."
     }
   }
 }
