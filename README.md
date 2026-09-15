@@ -12,3 +12,11 @@ I liked to have an indepentent implementation of the oauth2 authentication flow.
 Inspired by <https://github.com/node-red/node-red-web-nodes/tree/master/google>, I implemented this node in a similar way.
 
 Maybe it's useful for others. Up to now, there are no releases.
+
+## Requirements
+
+Node-RED 4.0 or newer on Node.js 18.5 or newer. The token requests use the
+`fetch` API built into Node.js, so there are no runtime dependencies. Note that
+Node.js `fetch` ignores the `HTTP_PROXY`/`HTTPS_PROXY` environment variables -
+if your token endpoint is only reachable through a proxy, it has to be reachable
+directly from Node-RED.

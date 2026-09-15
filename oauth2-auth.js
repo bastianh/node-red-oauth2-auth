@@ -2,13 +2,12 @@ module.exports = function (RED) {
   "use strict";
 
   const crypto = require("crypto");
-  const request = require('request');
 
   // Some token endpoints sit behind a WAF (e.g. Cloudflare) that answers requests
   // without a User-Agent with an HTML error page instead of the token response.
   const USER_AGENT = "node-red-oauth2-auth/" + require("./package.json").version;
-  const TOKEN_REQUEST_HEADERS = { "User-Agent": USER_AGENT };
 
+  const TOKEN_REQUEST_TIMEOUT = 30000;
   const MAX_BODY_SNIPPET_LENGTH = 200;
 
   // Short, single line description of a response body for error messages.
@@ -45,10 +44,8 @@ module.exports = function (RED) {
 
   // Returns a description of what is wrong with a token endpoint response,
   // or null if the response carries a usable access token.
-  function getTokenResponseError(result, data) {
-    const status_code = result && result.statusCode;
-
-    if (typeof status_code === "number" && (status_code < 200 || status_code > 299)) {
+  function getTokenResponseError(status_code, data) {
+    if (status_code < 200 || status_code > 299) {
       return "Token endpoint returned HTTP " + status_code + ": " + (describeOAuthError(data) || describeResponseBody(data));
     }
 
@@ -67,6 +64,47 @@ module.exports = function (RED) {
     }
 
     return null;
+  }
+
+  // Description of a failed request (no response at all) for error messages.
+  function describeRequestError(err) {
+    if (err && err.name === "TimeoutError") {
+      return "No response from token endpoint within " + TOKEN_REQUEST_TIMEOUT + " ms.";
+    }
+
+    // fetch wraps the underlying network error (DNS, TLS, refused) in `cause`.
+    if (err && err.cause && err.cause.message) {
+      return err.message + " (" + err.cause.message + ")";
+    }
+
+    return err && err.message ? err.message : String(err);
+  }
+
+  // POSTs a form encoded token request and returns { status_code, data }, where
+  // data is the parsed JSON body or, if it is not JSON, the raw text.
+  async function postTokenRequest(url, form) {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "User-Agent": USER_AGENT,
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Accept": "application/json"
+      },
+      body: new URLSearchParams(form),
+      signal: AbortSignal.timeout(TOKEN_REQUEST_TIMEOUT)
+    });
+
+    const text = await response.text();
+
+    var data;
+
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      data = text;   // e.g. the HTML error page of a WAF
+    }
+
+    return { status_code: response.status, data: data };
   }
 
   // Expiry as absolute time in seconds, or null if the response does not tell us.
@@ -157,33 +195,23 @@ module.exports = function (RED) {
     }
 
     // Access token is expiured - Perform refresh
-    request.post({
-      url: creds.access_token_url,
-      json: true,
-      headers: TOKEN_REQUEST_HEADERS,
-      form: {
-        grant_type: 'refresh_token',
-        client_id: creds.client_id,
-        client_secret: creds.client_secret,
-        refresh_token: creds.refresh_token
-      }
-    }, 
-    function (err, result, data) {
-      if (err) {
-        node.error(RED._("oauth2auth.error.get_access_token", { error: err }));
-        return callback(err);
-      }
-
+    postTokenRequest(creds.access_token_url, {
+      grant_type: 'refresh_token',
+      client_id: creds.client_id,
+      client_secret: creds.client_secret,
+      refresh_token: creds.refresh_token
+    }).then(function (response) {
       // Only a 2xx response carrying an access token is a successful refresh.
       // Anything else (e.g. an HTML error page from a WAF) must not overwrite
       // the stored credentials.
-      const response_error = getTokenResponseError(result, data);
+      const response_error = getTokenResponseError(response.status_code, response.data);
 
       if (response_error) {
         node.error(RED._("oauth2auth.error.refresh_access_token", { error: response_error }));
         return callback(response_error);
       }
 
+      const data = response.data;
       const expiry = getExpireTime(data, now);
 
       const newCredentials = {
@@ -199,6 +227,13 @@ module.exports = function (RED) {
       RED.nodes.addCredentials(node.id, newCredentials);
 
       return callback(null);
+    }, function (err) {
+      // Second argument of then(): failures of the handler above must not end
+      // up here and call back twice.
+      const error = describeRequestError(err);
+
+      node.error(RED._("oauth2auth.error.get_access_token", { error: error }));
+      return callback(error);
     });
   }
 
@@ -243,7 +278,7 @@ module.exports = function (RED) {
     res.redirect(authentication_url_obj.href);
   });
 
-  RED.httpAdmin.get('/oauth2-auth/callback', function (req, res) {
+  RED.httpAdmin.get('/oauth2-auth/callback', async function (req, res) {
     if (req.query.error) {
       return res.send(RED._("oauth2auth.error.error", { error: req.query.error, description: req.query.error_description }));
     }
@@ -261,47 +296,44 @@ module.exports = function (RED) {
       return res.status(401).send(RED._("oauth2auth.error.csrf_token_mismatch"));
     }
    
-    request.post({
-      url: credentials.access_token_url,
-      json: true,
-      headers: TOKEN_REQUEST_HEADERS,
-      form: {
+    var response;
+
+    try {
+      response = await postTokenRequest(credentials.access_token_url, {
         grant_type: 'authorization_code',
         code: auth_code,
         client_id: credentials.client_id,
         client_secret: credentials.client_secret,
         redirect_uri: credentials.redirect_url,
-      }
-    },
-      function (err, result, data) {
-        if (err) {
-          return res.send(RED._("oauth2auth.error.get_access_token", { error: err }));
-        }
-
-        // Only a 2xx response carrying an access token counts as a successful
-        // code exchange. Everything else is reported instead of being stored as
-        // an "authorized" node without any token.
-        const response_error = getTokenResponseError(result, data);
-
-        if (response_error) {
-          return res.send(RED._("oauth2auth.error.something_broke", { error: response_error }));
-        }
-
-        const now = Math.floor(Date.now() / 1000);
-        const expiry = getExpireTime(data, now);
-
-        credentials.access_token = data.access_token;
-        credentials.refresh_token = data.refresh_token;
-        credentials.expires_in = expiry ? expiry.expires_in : undefined;
-        credentials.expire_time = expiry ? expiry.expire_time : undefined;
-        credentials.auth_time = Date.now();
-
-        delete credentials.csrf_token;
-        delete credentials.redirect_url;
-
-        RED.nodes.addCredentials(node_id, credentials);
-
-        res.send(RED._("oauth2auth.message.authorisation_successful"));
       });
+    } catch (err) {
+      return res.send(RED._("oauth2auth.error.get_access_token", { error: describeRequestError(err) }));
+    }
+
+    // Only a 2xx response carrying an access token counts as a successful code
+    // exchange. Everything else is reported instead of being stored as an
+    // "authorized" node without any token.
+    const response_error = getTokenResponseError(response.status_code, response.data);
+
+    if (response_error) {
+      return res.send(RED._("oauth2auth.error.something_broke", { error: response_error }));
+    }
+
+    const data = response.data;
+    const now = Math.floor(Date.now() / 1000);
+    const expiry = getExpireTime(data, now);
+
+    credentials.access_token = data.access_token;
+    credentials.refresh_token = data.refresh_token;
+    credentials.expires_in = expiry ? expiry.expires_in : undefined;
+    credentials.expire_time = expiry ? expiry.expire_time : undefined;
+    credentials.auth_time = Date.now();
+
+    delete credentials.csrf_token;
+    delete credentials.redirect_url;
+
+    RED.nodes.addCredentials(node_id, credentials);
+
+    res.send(RED._("oauth2auth.message.authorisation_successful"));
   });
 }
